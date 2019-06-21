@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Gamedev Canvas Workshop</title>
+    <style>
+      canvas {
+        padding-left: 0;
+        padding-right: 0;
+        margin-left: auto;
+        margin-right: auto;
+        display: block;
+      }
+      #startBtn {
+        position: absolute;
+        top: 325px;
+        left: 400px;
+        width: 200px;
+        height: 50px;
+        font-size: 20px;
+      }
+      #container {
+        background-color: blue;
+        margin-left: 10%;
+        margin-right: 10%;
+      }
+    </style>
+</head>
+<body>
+  <div id="container">
+    <canvas id="backgroundCanvas" width="1000" height="650" style="z-index: 1;
+    position: absolute"></canvas>
+    <canvas id="myCanvas" width="1000" height="650" style="z-index: 2;
+    position: absolute;"></canvas>
+  </div>
+<script>
+	// JavaScript code goes here
+  var canvas = document.getElementById("myCanvas");
+  var canvas1 = document.getElementById("backgroundCanvas");
+  var ctx = canvas.getContext("2d");
+  var ctx1 = canvas1.getContext("2d");
+
+  // Timing Events
+  var drawInterval;
+  var shotInterval;
+  var transitionInterval;
+  var bossInterval;
+
+  // Game controller
+  var rightPressed = false;
+  var leftPressed = false;
+  var inGame = false;
+  var inStart = true;
+  var isSeeker = true;
+
+  // Timers
+  var timer;
+  var sTimer;
+  var shieldTimer;
+  var startTimer;
+
+  // Alien properties
+  var alienRowCount = 2;
+  var alienColumnCount = 10;
+  var alienWidth = 64;
+  var alienHeight = 64;
+  var alienPadding = 10;
+  var alienOffsetTop = 64;
+  var alienOffsetLeft = 30;
+  var alienStopTop = 64;
+  var alienStopBottom = 138;
+  var aShotSpeed = 3;
+
+  // Shot variables
+  var shots = [];
+  var explosions = [];
+  var rumbles = [];
+  var totalShots = 0;
+  var shotSize = 40;
+
+  // Game Attributes
+  var game = {
+    score: 0,
+    goal: Math.floor(Math.random() * 90) + 10,
+    total: null,
+    correctResponses: 0,
+    drawScore: function() {
+      ctx.font = "18px Arial";
+      ctx.fillText("Score: " + this.score, 8, 20);
+    },
+    drawLives: function() {
+      for(var l = 0; l < player.lives; l++) {
+        ctx.drawImage(image_fighter, (l * 35) + 10, canvas.height - 35, 35, 35);
+      }
+      for(var s = 0; s < player.shields; s++) {
+        ctx.drawImage(image_shield, 125, canvas.height - 35, 35, 35);
+      }
+    },
+    updateTotal: function(value) {
+      if(this.total == null) {
+        this.total = value;
+      }
+      else if(currentOp == "+") {
+        this.total += value;
+      }
+      else if(currentOp == "-") {
+        this.total -= value;
+      }
+      else if(currentOp == "*") {
+        this.total *= value;
+      }
+      else if(currentOp == "/") {
+        if(this.total > 0){
+        this.total = Math.floor(this.total / value);
+        }
+        else {
+          this.total = 0;
+        }
+      }
+      if(this.total == this.goal) {
+        this.goal = Math.floor(Math.random() * 90) + 10; // Generate new goal
+        this.total = null;
+        this.score += 100;
+        this.correctResponses++;
+        if(this.correctResponses == 1) {
+          inGame = false;
+          player.shieldActive = false;
+          clearInterval(drawInterval);
+          clearInterval(shotInterval);
+          transitionInterval = setInterval(drawTransition, 10);
+        }
+      }
+    }
+  };
+
+  // Player Attributes
+  var player = {
+    x: (canvas.width - 64) / 2,
+    y: canvas.height - 114,
+    width: 64,
+    height: 64,
+    lives: 3,
+    shields: 1,
+    doubleshot: false,
+    shieldActive: false,
+
+    draw: function () {
+      ctx.drawImage(image_fighter, this.x, this.y);
+      if(this.shieldActive == true) {
+        ctx.drawImage(image_shield, this.x - 13, canvas.height - this.height - 57, 90, 90);
+      }
+    },
+    shoot: function() {
+      if(player.doubleshot == false){
+        shot = {x: this.x, y: canvas.height - (this.height * 2), status: 1};
+        shots.push(shot);
+      }
+      else {
+        leftShot = {x: this.x - 16, y: canvas.height - (this.height * 1.5), status: 1};
+        rightShot = {x: this.x + 16, y: canvas.height - (this.height * 1.5), status: 1};
+        shots.push(leftShot);
+        shots.push(rightShot);
+      }
+    }
+  };
+
+  // Boss Attributes
+  var boss = {
+    x: 406,
+    y: 10,
+    width: 206,
+    height: 170,
+    health: 100,
+
+    draw: function () {
+      ctx.drawImage(image_boss, this.x, this.y, this.width, this.height);
+    },
+    damage: function() {
+      ctx.drawImage(image_damaged, this.x, this.y, this.width, this.height);
+    },
+    healthBar: function() {
+      if(this.health > 0) {
+        var length = (this.health * 2);
+        ctx.fillRect(980 - length, 15, length, 30);
+        ctx.stroke();
+      }
+      else {
+        alert("Wave 1 Complete!");
+        document.location.reload();
+        clearInterval(bossInterval);
+      }
+    },
+    shoot: function() {
+      var remainder = totalShots % 7;
+      if(remainder == 0) {
+        bossShot = {x: boss.x + (boss.width / 2) - 15, y: boss.height, status: 4, path: 0};
+      }
+      else {
+        bossShot = {x: boss.x + (boss.width / 2), y: boss.height, status: 4, path: remainder};
+      }
+      shots.push(bossShot);
+      totalShots++;
+    }
+  };
+
+  // Generate aliens
+  var aliens = [];
+  for(var col = 0; col < alienColumnCount; col++) {
+    aliens[col] = [];
+    for(var row = 0; row < alienRowCount; row++) {
+      var val = Math.floor(Math.random() * 9) + 1;
+      if(col < 5) {
+        var aX = (col * (alienWidth + alienPadding)) + alienOffsetLeft;
+        var aY = (row * (alienHeight + alienPadding)) + alienOffsetTop;
+        aliens[col][row] = {x: aX, y: aY, status: 1, value: val};
+      }
+      else {
+        var aX = ((col + 3) * (alienWidth + alienPadding)) + alienOffsetLeft;
+        var aY = (row * (alienHeight + alienPadding)) + alienOffsetTop;
+        aliens[col][row] = {x: aX, y: aY, status: 1, value: val};
+      }
+    }
+  }
+
+  // Alien Image
+  const image_ufo = new Image(64, 64);
+  image_ufo.src = "/Users/jonneff/Documents/Education/images/g-03.png";
+  // Shield Image
+  const image_shield = new Image(64, 64);
+  image_shield.src = "/Users/jonneff/Documents/Education/images/spr_shield.png";
+  const image_shieldHit = new Image(64, 64);
+  image_shieldHit.src = "/Users/jonneff/Documents/Education/images/shieldDamage.jpg";
+  // Projectile Image
+  const image_beam = new Image(64, 64);
+  image_beam.src = "/Users/jonneff/Documents/Education/images/beams.png";
+  const image_round = new Image(64, 64);
+  image_round.src = "/Users/jonneff/Documents/Education/images/round.png";
+  const image_round2 = new Image(64, 64);
+  image_round2.src = "/Users/jonneff/Documents/Education/images/round2.png";
+  // Fighter Jet Image
+  const image_fighter = new Image(64, 64);
+  image_fighter.src = "/Users/jonneff/Documents/Education/images/fighter.png";
+  // Alien Boss Image
+  const image_boss = new Image(64, 64);
+  image_boss.src = "/Users/jonneff/Documents/Education/images/g-01.png";
+  const image_damaged = new Image(64, 64);
+  image_damaged.src = "/Users/jonneff/Documents/Education/images/c-01.png";
+  // Math Operator Images
+  const image_minus = new Image(64, 64);
+  image_minus.src = "/Users/jonneff/Documents/Education/images/minus.png";
+  const image_add = new Image(64,64);
+  image_add.src = "/Users/jonneff/Documents/Education/images/add.png";
+  const image_div = new Image(64,64);
+  image_div.src = "/Users/jonneff/Documents/Education/images/division.png";
+  const image_mult = new Image(64, 64);
+  image_mult.src = "/Users/jonneff/Documents/Education/images/multiply.png";
+  // Background Image
+  const image_bg = new Image(1000, 650);
+  image_bg.src = "/Users/jonneff/Documents/Education/images/bg.png";
+  // Explosion Image
+  const image_explosion = new Image();
+  image_explosion.src = "/Users/jonneff/Documents/Education/images/explode.png";
+
+  // Generate operators
+  var operators = [];
+  operators[0] = {image: image_minus, op: "-"};
+  operators[1] = {image: image_add, op: "+"};
+  operators[2] = {image: image_div, op: "/"};
+  operators[3] = {image: image_mult, op: "*"};
+  var opCount = 0; // Used for determingin position of operator images and calculations
+  var leftOpX = (5 * (alienWidth + alienPadding)) + alienOffsetLeft + (alienWidth/4);
+  var middleOpX = (6 * (alienWidth + alienPadding)) + alienOffsetLeft;
+  var rightOpX = (7 * (alienWidth + alienPadding)) + alienOffsetLeft - (alienWidth/4);
+
+  var transition = 0;
+
+  // Key listeners
+  document.addEventListener("keydown", keyDownHandler, false);
+  document.addEventListener("keyup", keyUpHandler, false);
+
+  // Keydown event handler happens when a key is pressed down
+  function keyDownHandler(e) {
+    // Right arrow key is pressed: moves player to the right
+    if(e.key == "Right" || e.key == "ArrowRight") {
+        rightPressed = true;
+    }
+    // Left arrow key is pressed: moves player to the left
+    else if(e.key == "Left" || e.key == "ArrowLeft") {
+        leftPressed = true;
+    }
+    // Enter key is pressed: start game
+    else if(e.key == 'Enter'){
+        ctx1.drawImage(image_bg, 0, 0, canvas.width, canvas.height);
+        ctx1.drawImage(image_boss, boss.x, boss.y, boss.width, boss.height);
+        timer = 3;
+        startTimer = setInterval(countdownStart, 1000);
+        inStart = false;
+    }
+    // Space bar is pressed: player shoots a bullet
+    else if(e.key == " ") {
+      if(inGame == true) {
+        player.shoot();
+      }
+    }
+    // Letter s key is pressed: player activates shield
+    else if(e.key == "s") {
+      if(inGame == true) {
+        if(player.shields > 0) {
+          player.shieldActive = true;
+          player.shields--;
+          sTimer = 30;
+          shieldTimer = setInterval(countdownShield, 1000);
+        }
+      }
+    }
+    // Letter d key is pressed: player activates doubleshot
+    else if(e.key == "d") {
+      if(inGame == true) {
+        player.doubleshot = true;
+      }
+    }
+  }
+
+  // Keyup event handler happens when a key is released
+  function keyUpHandler(e) {
+      if(e.key == "Right" || e.key == "ArrowRight") {
+          rightPressed = false;
+      }
+      else if(e.key == "Left" || e.key == "ArrowLeft") {
+          leftPressed = false;
+      }
+  }
+
+  // Timer used for keeping track of the remaining time in seconds a shield
+  //  is to be active. A shield will last 30 seconds.
+  function countdownShield() {
+    if(sTimer < 0) {
+      clearTimeout(shieldTimer);
+      player.shieldActive = false;
+    }
+    else {
+      sTimer--;
+    }
+  }
+
+  // Timer used to keep track of the time in seconds remaining before the game starts
+  function countdownStart() {
+    if(timer == 0) {
+      clearTimeout(startTimer);
+      gameStart();
+    }
+    else {
+      drawWave();
+      ctx.font = "80px Verdana";
+      ctx.fillText(timer.toString(), 480, 430);
+      timer--;
+    }
+  }
+
+  // Initiates game intervals (loops) used during the regular round.
+  function gameStart() {
+    inGame = true;
+    drawInterval = setInterval(drawWave, 10);
+    shotInterval = setInterval(addAlienShot, 1000);
+  }
+
+  // Timer used to keep track of the time in seconds reamining before the boss round starts
+  function countdownBoss() {
+    if(timer == 0) {
+      clearTimeout(startTimer);
+      bossStart();
+    }
+    else {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      boss.draw();
+      player.draw();
+      game.drawLives();
+      game.drawScore();
+      ctx.font = "80px Verdana";
+      ctx.fillText(timer.toString(), 480, 430);
+      timer--;
+    }
+  }
+
+  // Initiates game intervals (loops) used during the boss round.
+  function bossStart() {
+    inGame = true;
+    totalShots = 0;
+    ctx1.fillStyle = "#bc13fe";
+    ctx1.fillRect(780, 15, 200, 30);
+    ctx1.stroke();
+    bossInterval = setInterval(drawBossWave, 10);
+    shotInterval = setInterval(boss.shoot, 1000);
+  }
+
+  // Add regular or seeker shot at random to the array of shots being drawn to canvas
+  function addAlienShot() {
+    var col = Math.floor(Math.random() * 10); // Select alien from random column
+    if(aliens[col][1].status == 1) {
+      if(totalShots % col == 0) {
+        alienShot = {x: aliens[col][1].x + 7, y: aliens[col][1].y + alienHeight - 15, status: 3};
+      }
+      else {
+        alienShot = {x: aliens[col][1].x + 7, y: aliens[col][1].y + alienHeight - 15, status: 2};
+      }
+      shots.push(alienShot);
+      totalShots++;
+    }
+    else {
+      addAlienShot();
+    }
+  }
+
+  // Add explosion sprite to array of explosions being drawn to canvas
+  function addExplosion(x, y) {
+
+    var explosion = sprite({
+      width: 256,
+      height: 256,
+      x: x,
+      y: y,
+      image: image_explosion,
+      frameIndex: 0,
+      numberOfFrames: 64,
+    });
+    explosions.push(explosion);
+  }
+
+  // Iterate through array of explosions to be drawn to canvas.
+  function drawExplosions() {
+    for(var e = 0; e < explosions.length; e++){
+      var exp = explosions[e];
+      if(exp.frameIndex == exp.numberOfFrames - 1) {
+        explosions.splice(e,1);
+      }
+      else {
+        exp.render();
+        exp.update();
+      }
+    }
+  }
+
+  // Add nearby aliens to array of rumbles to be shook on canvas from explosion.
+  function addRumble(col) {
+
+    if(col != 0 && col != 5) {
+      var rumble = {
+        col: col - 1,
+        time: 0,
+      }
+      rumbles.push(rumble);
+    }
+    if(col != 4 && col != 9) {
+      var rumble = {
+        col: col + 1,
+        time: 0,
+      }
+      rumbles.push(rumble);
+    }
+  }
+
+  // Interate through array of rumbles to be
+  function drawRumbles() {
+    for(var r = 0; r < rumbles.length; r++) {
+      rumble = rumbles[r];
+
+      if(rumble.time == 14) {
+        rumbles.splice(r, 1);
+      }
+      else if(rumble.time % 2 == 1) {
+        aliens[rumble.col][1].x += 3;
+        rumble.time++;
+      }
+      else {
+        aliens[rumble.col][1].x -= 3;
+        rumble.time++;
+      }
+    }
+  }
+
+  // Draw shots to canvas originating from player and aliens during regular round
+  function drawShots() {
+    for(var s = 0; s < shots.length; s++){
+      var shot = shots[s];
+      // Player shot has a shot status of "1"
+      if(shot.status == 1) {
+        var shotX = shot.x;
+        shot.y -= (((650 - shot.y)/650)*15);
+        var shotY = shot.y;
+        if(shot.y < 350) {
+          ctx.drawImage(image_beam, 30, 140, 25, 25, shotX + 8, shotY, shotSize, shotSize);
+        }
+        else {
+          ctx.drawImage(image_beam, 30, 110, 25, 25, shotX + 8, shotY, shotSize, shotSize);
+        }
+      }
+      // Alien shot has a shot status of "2"
+      else if(shot.status == 2) {
+        var shotX = shot.x;
+        shot.y += aShotSpeed;
+        var shotY = shot.y;
+        ctx.drawImage(image_round, shotX + 16, shotY, 13, 13);
+      }
+      // Alien seeker shot has a shot status of "3"
+      else if(shot.status == 3) {
+        var shotX = shot.x;
+        if(player.x + 10 > shotX) {
+          shot.x += aShotSpeed - 1;
+        }
+        else if(player.x + 12 < shotX) {
+          shot.x -= aShotSpeed - 1;
+        }
+        shot.y += aShotSpeed - 1;
+        var shotY = shot.y;
+        ctx.drawImage(image_round, shotX + 12, shotY, 10, 10);
+      }
+    }
+  }
+
+  // Draw shots to canvas originating from player and boss during boss round
+  function drawBossShots() {
+    for(var s = 0; s < shots.length; s++){
+      var shotX;
+      var shotY;
+
+      // Player shot
+      if(shots[s].status == 1) {
+        var pS = shots[s];
+        shotX = pS.x;
+        pS.y -= (((650 - pS.y)/650)*15);
+        shotY = pS.y;
+        if(pS.y < 350) {
+          ctx.drawImage(image_beam, 30, 140, 25, 25, shotX + 8, shotY, shotSize, shotSize);
+        }
+        else {
+          ctx.drawImage(image_beam, 30, 110, 25, 25, shotX + 8, shotY, shotSize, shotSize);
+        }
+      }
+      // Boss shot
+      else if(shots[s].status == 4) {
+        var bS = shots[s];
+        var x;
+        var y;
+        var offset;
+
+        if(bS.path == 0) {
+          x = bS.x;
+          y = bS.y;
+        }
+        else if(bS.path == 1) {
+          y = bS.y - 170;
+          offset = Math.floor(((Math.pow(y - 240, 2) - 57600)/400));
+          x = offset + 490;
+        }
+        else if(bS.path == 2) {
+          y = bS.y - 170;
+          offset = Math.floor(((Math.pow(y - 240, 2) - 57600)/400));
+          x = Math.abs(offset) + 490;
+        }
+        else if(bS.path == 3) {
+          y = bS.y - 170;
+          offset = Math.floor(((Math.pow(y - 240, 2) - 57600)/250));
+          x = offset + 490;
+        }
+        else if(bS.path == 4) {
+          y = bS.y - 170;
+          offset = Math.floor(((Math.pow(y - 240, 2) - 57600)/250));
+          x = Math.abs(offset) + 490;
+        }
+        else if(bS.path == 5) {
+          y = bS.y - 170;
+          offset = Math.floor(((Math.pow(y - 240, 2) - 57600)/150));
+          x = offset + 490;
+        }
+        else if(bS.path == 6) {
+          y = bS.y - 170;
+          offset = Math.floor(((Math.pow(y - 240, 2) - 57600)/150));
+          x = Math.abs(offset) + 490;
+        }
+        bS.x = x;
+        shotX = x;
+        bS.y += 1;
+        shotY = bS.y;
+        ctx.drawImage(image_round, shotX, shotY, 25, 25);
+      }
+    }
+  }
+
+  // Draw aliens to canvas
+  function drawAliens() {
+    ctx.font = "23px Verdana";
+    ctx.fillStyle = "white";
+    for(var col = 0; col < alienColumnCount; col++) {
+      for(var row = 0; row < alienRowCount; row++) {
+        if(aliens[col][row].status == 1) {
+          var aX = aliens[col][row].x;
+          var aY = aliens[col][row].y;
+          ctx.drawImage(image_ufo, aX, aY, 64, 64);
+          ctx.fillText(aliens[col][row].value, (aX + (alienWidth/2) - 8), aY + alienHeight);
+        }
+        else if(aliens[col][row].status == 2) {
+          if(aliens[col][row].y < alienStopBottom) {
+            aliens[col][row].y += 1;
+            ctx.drawImage(image_ufo, aliens[col][row].x, aliens[col][row].y, 64, 64);
+          }
+          else {
+            aliens[col][row].status = 1;
+          }
+        }
+        else if(aliens[col][row].status == 3) {
+          if(aliens[col][row].y < alienStopTop) {
+            aliens[col][row].y += 0.5;
+            ctx.drawImage(image_ufo, aliens[col][row].x, aliens[col][row].y, 64, 64);
+          }
+          else {
+            aliens[col][row].status = 1;
+          }
+        }
+      }
+    }
+  }
+
+  // Draw operators to canvas
+  function drawOperators() {
+    var temp = opCount % 4;
+    ctx.drawImage(operators[temp].image, leftOpX, 220);
+    ctx.drawImage(operators[(temp+1) % 4].image, middleOpX, 254);
+    currentOp = operators[(temp+1) % 4].op;
+    ctx.drawImage(operators[(temp+2) % 4].image, rightOpX, 220);
+    ctx.drawImage(operators[(temp+3) % 4].image, middleOpX, 186);
+
+    ctx.fillStyle = "white";
+    ctx.font = "35px Verdana";
+    ctx.fillText(game.goal, 487, 125);
+    if(game.total != null){
+      ctx.fillStyle = "white";
+      ctx.font = "25px Verdana";
+      ctx.fillText(game.total, 490, 392);
+    }
+  }
+
+  // Detects whether or not a player shot collides with an alien, or an alien shot
+  //  collides with a player.
+  function collisionDetection() {
+    for(var c = 0; c < alienColumnCount; c++) {
+      for(var r = 1; r < alienRowCount; r++) {
+        var a = aliens[c][r];
+        if(a.status == 1) {
+          for(var s = 0; s < shots.length; s++) {
+            // Shots originating from player
+            if(shots[s].status == 1) {
+              // Collision with alien
+              if(shots[s].x > (a.x - 32) && shots[s].x < (a.x - 32) + alienWidth && shots[s].y > a.y && shots[s].y < a.y + alienHeight) {
+                addExplosion(shots[s].x - 16, a.y);
+                addRumble(c);
+                a.status = 2;
+                a.y = aliens[c][0].y; // Set alien y pos to alien above it
+                game.updateTotal(a.value);
+                a.value = aliens[c][0].value; // Set value to alien above it
+                aliens[c][0].status = 3;
+                aliens[c][0].y = 0;
+                aliens[c][0].value = Math.floor(Math.random() * 9) + 1;
+                shots.splice(s,1);
+                game.score += 10;
+              }
+              // Reaches top of canvas
+              else if(shots[s].y < 0) {
+                shots.splice(s,1);
+              }
+              // Collision with operator
+              else if(shots[s].x > (leftOpX - 32) && shots[s].x < (rightOpX + 32) && shots[s].y < 250) {
+                opCount++;
+                shots.splice(s,1);
+              }
+            }
+            // Collision with player
+            else if(shots[s].status == 2 || shots[s].status == 3) {
+              if(shots[s].y > canvas.height - player.height - 60) {
+                if(shots[s].x > player.x && shots[s].x < player.x + player.width) {
+                  if(player.shieldActive == false) {
+                    if(player.lives == 0) {
+                      alert("GAME OVER");
+                      document.location.reload();
+                      clearInterval(drawInterval);
+                      clearInterval(shotInterval); // Needed for Chrome to end game
+                    }
+                    else {
+                      player.lives--;
+                      shots.splice(s,1);
+                    }
+                  }
+                  else {
+                    shots.splice(s,1);
+                  }
+                }
+              }
+              if(shots[s].y > canvas.height - shotSize) {
+                shots.splice(s,1);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Detects whether or not a player shot collides with the boss, or a boss shot
+  //  collides with a player.
+  function collisionDetectionBoss() {
+    for(var s = 0; s < shots.length; s++) {
+      // Shots originating from player
+      if(shots[s].status == 1) {
+        // Collision with Boss
+        if(shots[s].x > boss.x - 32 && shots[s].x < boss.x + boss.width - 32 && shots[s].y > boss.y && shots[s].y < boss.y + boss.height - 20) {
+          boss.health -= 2;
+          boss.damage();
+          shots.splice(s,1);
+          game.score += 10;
+        }
+        // Reaches top of canvas
+        else if(shots[s].y < 0) {
+          shots.splice(s,1);
+        }
+      }
+      // Collision with player
+      else if(shots[s].status == 4) {
+        if(shots[s].y > canvas.height - player.height - 60) {
+          if(shots[s].x > player.x && shots[s].x < player.x + player.width) {
+            if(player.shieldActive == false) {
+              if(player.lives == 0) {
+                alert("GAME OVER");
+                document.location.reload();
+                clearInterval(drawInterval);
+                clearInterval(shotInterval); // Needed for Chrome to end game
+              }
+              else {
+                player.lives--;
+                shots.splice(s,1);
+              }
+            }
+            else {
+              shots.splice(s,1);
+            }
+          }
+        }
+        if(shots[s].y > canvas.height - shotSize) {
+          shots.splice(s,1);
+        }
+      }
+    }
+  }
+
+  // Used to draw transition of objects between regular and boss round.
+  function drawTransition() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    player.draw();
+    game.drawScore();
+    game.drawLives();
+
+    if(player.x > (canvas.width - player.width) / 2){
+      player.x--;
+    }
+    else if(player.x < (canvas.width - player.width) / 2) {
+      player.x++;
+    }
+
+    var temp = opCount % 4;
+
+    if(transition < 32) {
+      drawAliens();
+      ctx.drawImage(operators[temp].image, leftOpX - transition, 220);
+      ctx.drawImage(operators[(temp+1) % 4].image, middleOpX - transition, 254);
+      ctx.drawImage(operators[(temp+2) % 4].image, rightOpX + transition, 220);
+      ctx.drawImage(operators[(temp+3) % 4].image, middleOpX + transition, 186);
+      transition++;
+    }
+    if(transition < 40) {
+      drawAliens();
+      ctx.drawImage(operators[temp].image, leftOpX - transition, 220);
+      ctx.drawImage(operators[(temp+1) % 4].image, middleOpX - 32, 254);
+      ctx.drawImage(operators[(temp+2) % 4].image, rightOpX + transition, 220);
+      ctx.drawImage(operators[(temp+3) % 4].image, middleOpX + 32, 186);
+      transition++;
+    }
+    else if(transition < 74) {
+      drawAliens();
+      ctx.drawImage(operators[temp].image, leftOpX - 40, 220);
+      ctx.drawImage(operators[(temp+1) % 4].image, middleOpX - 32, 254 - (transition - 40));
+      ctx.drawImage(operators[(temp+2) % 4].image, rightOpX + 40, 220);
+      ctx.drawImage(operators[(temp+3) % 4].image, middleOpX + 32, 186 + (transition - 40));
+      transition++;
+    }
+    else if(transition < 575) {
+      drawAliens();
+      ctx.drawImage(operators[temp].image, leftOpX - transition + 34, 220);
+      ctx.drawImage(operators[(temp+1) % 4].image, middleOpX - transition + 42, 220);
+      ctx.drawImage(operators[(temp+2) % 4].image, rightOpX + transition - 34, 220);
+      ctx.drawImage(operators[(temp+3) % 4].image, middleOpX + transition - 42, 220);
+      transition++;
+    }
+    else if(transition < 775) {
+      for(var c = 0; c < alienColumnCount; c++) {
+        for(var r = 0; r < alienRowCount; r++) {
+          var a = aliens[c][r];
+          if(c < 1) {
+            a.x -= 2;
+          }
+          else if(c < 2) {
+            a.y -= 1;
+            a.x -= 2;
+          }
+          else if(c < 3){
+            a.y -= 2;
+            a.x -= 2;
+          }
+          else if(c < 4){
+            a.y -= 2;
+            a.x -= 1;
+          }
+          else if(c < 6) {
+            a.y -= 1;
+          }
+          else if(c < 7){
+            a.y -= 2;
+            a.x += 1;
+          }
+          else if(c < 8) {
+            a.y -= 1;
+            a.x += 2;
+          }
+          else {
+            a.x += 2;
+          }
+          ctx.drawImage(image_ufo, a.x, a.y, 64, 64);
+        }
+      }
+      transition++;
+    }
+    else if(transition == 775) {
+      clearInterval(transitionInterval);
+      timer = 3;
+      startTimer = setInterval(countdownBoss, 1000);
+      countdownBoss();
+    }
+  }
+
+  // Used for drawing objects, collision detection, and player movement during
+  //  the regular round.
+  function drawWave() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawShots();
+      drawAliens();
+      player.draw();
+      drawOperators();
+      collisionDetection();
+      drawExplosions();
+      drawRumbles();
+      game.drawScore();
+      game.drawLives();
+      if(rightPressed && player.x < canvas.width - player.width) {
+          player.x += 7;
+      }
+      else if(leftPressed && player.x > 0) {
+          player.x -= 7;
+      }
+  }
+
+  // Used for drawing objects, collision detection, and player movement during
+  //  the boss round.
+  function drawBossWave() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    player.draw();
+    drawBossShots();
+    collisionDetectionBoss();
+    boss.healthBar();
+    game.drawLives();
+    game.drawScore();
+
+    if(rightPressed && player.x < canvas.width - player.width) {
+        player.x += 7;
+    }
+    else if(leftPressed && player.x > 0) {
+        player.x -= 7;
+    }
+  }
+
+  // Draw the sprite explosion to the canvas.
+  function sprite(options) {
+
+    var that = {};
+    that.width = options.width;
+    that.height = options.height;
+    that.x = options.x;
+    that.y = options.y;
+    that.image = options.image;
+    that.frameIndex = options.frameIndex;
+    that.numberOfFrames = options.numberOfFrames;
+
+    that.render = function () {
+      // Draw the animation
+      ctx.drawImage(
+         that.image,
+         that.width * (that.frameIndex % 8), // source x
+         that.height * ((that.frameIndex - (that.frameIndex % 8)) / 8), // source y
+         that.width,
+         that.height,
+         that.x,
+         that.y,
+         100,
+         100);
+    };
+    that.update = function () {
+      // If the current frame is less than the total number of frames on sprite sheet.
+      if (that.frameIndex < that.numberOfFrames - 1) {
+        // Advance sprite to next frame.
+        that.frameIndex += 1;
+      }
+    };
+    return that;
+  }
+
+
+  if(inStart == true) {
+    ctx.font = "80px Verdana";
+    ctx.fillText("Press Enter to Start", 90, 400);
+  }
+
+
+</script>
+</body>
+</html>
